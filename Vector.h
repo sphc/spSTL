@@ -7,7 +7,7 @@
 
 #include <cstddef> //size_t, ptrdiff_t
 #include <climits> //UINT_MAX
-#include <memory> //allocator, uninitializer_copy()
+#include <memory> //allocator, uninitialized_copy, uninitialized_fill_n
 #include <initializer_list> //initializer_list
 
 namespace sp {
@@ -119,7 +119,7 @@ namespace sp {
                 const allocator_type &allocator = allocator_type{});
         template<typename InputIterator>
         Vector(InputIterator first, InputIterator last,
-               const Allocator &allocator = Allocator{}); 
+               const allocator_type &allocator = allocator_type{}); 
         Vector(const Vector &other);
         Vector(const Vector &other, const allocator_type &allocator);
         Vector(Vector &&other); 
@@ -132,6 +132,9 @@ namespace sp {
         Vector &operator = (const Vector &other);
         Vector &operator = (Vector &&other);
         void assign(size_type count, const value_type &value);
+        template<typename InputIterator>
+        void assign(InputIterator first, InputIterator last);
+        void assign(std::initializer_list<value_type> ilist);
 
         //get allocator
         allocator_type get_allocator() const;
@@ -140,8 +143,6 @@ namespace sp {
         reference operator [] (size_type index);
         const_reference operator [] (size_type index) const;
         reference front();
-        const_reference front() const;
-        reference back();
         const_reference back() const ;
         value_type *data() noexcept;
         const value_type *data() const noexcept;
@@ -164,6 +165,7 @@ namespace sp {
         bool empty() const noexcept;
         size_type size() const noexcept;
         size_type max_size() const noexcept;
+        void reserve(size_type newCapacity);
         size_type capacity() const noexcept;
         void sharink_to_fit();
 
@@ -185,16 +187,18 @@ namespace sp {
         value_type *start; //start of memory
         value_type *finish; //next position of last element
         value_type *termination; //next position of last memory
-        Allocator alloc;
-        const static size_type initCapacity = 1;
+        allocator_type alloc;
 
-        void alloc_copy(const Vector &other);
-        void reallocate();
+        template <typename InputIterator>
+        void alloc_copy(InputIterator first, InputIterator last);
+        void alloc_copy(size_type count, const value_type &value);
+        void reallocate(size_type theCapacity);
         void free();
     };
 
     template <typename T, typename Allocator>
-    Vector<T, Allocator>::Vector(const allocator_type &allocator) : Vector(0)
+    Vector<T, Allocator>::Vector(const allocator_type &allocator) 
+        : start{nullptr}, finish{nullptr}, termination{nullptr}, alloc{allocator}
     { }
 
     template <typename T, typename Allocator>
@@ -202,34 +206,27 @@ namespace sp {
     { }
 
     template <typename T, typename Allocator>
-    Vector<T, Allocator>::Vector(size_type count, const value_type &value, 
-            const allocator_type &allocator)
+    Vector<T, Allocator>::Vector(size_type count, const value_type &value, const allocator_type &allocator)
         : alloc{allocator} 
-    { 
-        finish = start = alloc.allocate(count + initCapacity);
-        termination = start + count + initCapacity;
-    }
+    {  alloc_copy(count, value); }
 
+    //重载冲突
     template <typename T, typename Allocator>
     template<typename InputIterator>
-    Vector<T, Allocator>::Vector(InputIterator first, InputIterator last,
-           const Allocator &allocator) 
+    Vector<T, Allocator>::Vector(InputIterator first, InputIterator last, const allocator_type &allocator) 
         : alloc{allocator}
-    {
-        start = alloc.allocate(static_cast<size_type>(last - first));
-        termination = finish = std::uninitialized_copy(first, last, start);
-    }
+    { alloc_copy(first, last); }
 
     template <typename T, typename Allocator>
     Vector<T, Allocator>::Vector(const Vector &other) 
         : alloc{std::allocator_traits<allocator_type>::
             select_on_container_copy_construction(other.get_allocator())} 
-    { alloc_copy(other); }
+    { alloc_copy(other.begin(), other.end()); }
 
     template <typename T, typename Allocator>
     Vector<T, Allocator>::Vector(const Vector &other, const allocator_type &allocator) 
         : alloc{allocator}
-    { alloc_copy(other); }
+    { alloc_copy(other.begin(), other.end()); }
 
     template <typename T, typename Allocator>
     Vector<T, Allocator>::Vector(Vector &&other) 
@@ -237,14 +234,15 @@ namespace sp {
           termination{other.termination}, alloc{std::move(other.alloc)}
     { other.start = other.finish = other.termination = nullptr; }
 
+    /*
     template <typename T, typename Allocator>
     Vector<T, Allocator>::Vector(Vector &&other, const allocator_type &allocator) 
         : alloc{allocator}
     {}
+    */
 
     template <typename T, typename Allocator>
-    Vector<T, Allocator>::Vector(std::initializer_list<value_type> ilist, 
-            const allocator_type &allocator) 
+    Vector<T, Allocator>::Vector(std::initializer_list<value_type> ilist, const allocator_type &allocator) 
         : Vector(ilist.begin(), ilist.end(), allocator)
     { }
 
@@ -257,7 +255,7 @@ namespace sp {
     {
         if (this != &other) {
             free();
-            alloc_copy(other);
+            alloc_copy(other.begin(), other.end());
         }
     }
 
@@ -277,11 +275,20 @@ namespace sp {
     void Vector<T, Allocator>::assign(size_type count, const value_type &value)
     {
         free();
-        start = alloc.allocate(count);
-        while (count--) {
-            alloc.construct(finish++, value);
-        }
+        alloc_copy(count, value);
     }
+
+    template <typename T, typename Allocator>
+    template <typename InputIterator>
+    void Vector<T, Allocator>::assign(InputIterator first, InputIterator last)
+    {
+        free();
+        alloc_copy(first, last);
+    }
+
+    template <typename T, typename Allocator>
+    void Vector<T, Allocator>::assign(std::initializer_list<value_type> ilist)
+    { assign(ilist.begin(), ilist.end()); }
 
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::allocator_type Vector<T, Allocator>::get_allocator() const
@@ -307,6 +314,7 @@ namespace sp {
     typename Vector<T, Allocator>::reference Vector<T, Allocator>::front()
     { return *start; }
 
+    /*
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::const_reference Vector<T, Allocator>::front() const
     { return *start; }
@@ -314,6 +322,7 @@ namespace sp {
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::reference Vector<T, Allocator>::back()
     { return *(finish - 1); }
+    */
 
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::const_reference Vector<T, Allocator>::back() const 
@@ -376,6 +385,14 @@ namespace sp {
     { return static_cast<size_type>(UINT_MAX / sizeof(value_type)); }
 
     template <typename T, typename Allocator>
+    void Vector<T, Allocator>::reserve(size_type newCapacity)
+    { 
+        if (newCapacity > capacity()) {
+            reallocate(newCapacity);
+        }
+    }
+
+    template <typename T, typename Allocator>
     typename Vector<T, Allocator>::size_type Vector<T, Allocator>::capacity() const noexcept
     { return static_cast<size_type>(termination - start); }
 
@@ -387,7 +404,7 @@ namespace sp {
     void Vector<T, Allocator>::push_back(const value_type &value)
     {
         if (finish >= termination) {
-            reallocate();
+            reallocate(capacity() ? 2 * capacity() : 1);
         }
 
         alloc.construct(finish++, value);
@@ -397,7 +414,7 @@ namespace sp {
     void Vector<T, Allocator>::push_back(value_type &&value)
     {
         if (finish >= termination) {
-            reallocate();
+            reallocate(capacity() ? 2 * capacity() : 1);
         }
 
         alloc.construct(finish++, std::move(value));
@@ -408,134 +425,46 @@ namespace sp {
     { alloc.destroy(--finish); }
 
     /*
-    iterator insert(const_iterator pos, const value_type &value)
-    {
-        if (finish >= termination) {
-            difference_type diff = pos - start;
-            reallocate();
-            pos = start + diff;
-        }
-        push_back(value);
+    template <typename T, typename Allocator>
+    iterator insert(const_iterator pos, const value_type &value);
 
-        iterator tmp = end() - 1;
-        while (tmp != pos) {
-            *tmp == std::move(*(tmp - 1));
-            --tmp;
-        }
-        *tmp = value;
+    template <typename T, typename Allocator>
+    iterator insert(const_iterator pos, value_type &&value);
 
-        return tmp;
-    }
+    template <typename T, typename Allocator>
+    iterator insert(const_iterator pos, size_type count, const value_type &value);
 
-    iterator insert(const_iterator pos, value_type &&value)
-    {
-        if (finish >= termination) {
-            difference_type diff = pos - start;
-            reallocate();
-            pos = start + diff;
-        }
-        push_back(value);
+    template <typename T, typename Allocator>
+    iterator insert(const_iterator pos, std::initializer_list<value_type> ilist);
 
-        iterator tmp = end() - 1;
-        while (tmp != pos) {
-            *tmp == std::move(*(tmp - 1));
-            --tmp;
-        }
-        *tmp = std::move(value);
+    template <typename T, typename Allocator>
+    iterator erase(const_iterator pos);
 
-        return tmp;
-    }
-
-    iterator insert(const_iterator pos, size_type count, const value_type &value)
-    {
-        difference_type diff = pos - start;
-
-        while (size() + count > capacity) {
-            reallocate();
-        }
-
-        pos = cbegin() + diff;
-        iterator tmp = begin() + diff + count;
-        while (tmp - count >= pos) {
-            *tmp = *(tmp - count);
-            --tmp;
-        }
-        while (count--) {
-            *tmp-- = value;
-        }
-        finish += count;
-
-        return  tmp + 1;
-    }
-
-    iterator insert(const_iterator pos, std::initializer_list<value_type> ilist)
-    {
-        difference_type diff = pos - start;
-
-        while (size() + ilist.size() > capacity) {
-            reallocate();
-        }
-
-        pos = cbegin() + diff;
-        iterator tmp = begin() + diff + ilist.size();
-        while (tmp >= pos) {
-            *tmp = *(tmp - ilist.size());
-            --tmp;
-        }
-        for (auto i = ilist.crbegin(); i != ilist.crend(); ++i) {
-            *tmp-- = *i;
-        }
-        finish += ilist.size();
-
-        return tmp + 1;
-    }
-
-    iterator erase(const_iterator pos)
-    {
-        const_iterator tmp = pos;
-
-        while (tmp + 1 != end()) {
-            *tmp = *(tmp + 1);
-            ++tmp;
-        }
-        --finish;
-
-        return pos;
-    }
-
-    iterator erase(const_iterator first, const_iterator last)
-    {
-        size_type count = last - first;
-
-        if (count == 0) {
-            return first;
-        }
-
-        while (first + count != end()) {
-            *first = *(first + count);
-            ++first;
-        }
-        finish -= count;
-
-        return first;
-    }
-
-    void resize(size_type count)
-    { resize(count, value_type{}); }
-
-    void resize(size_type count, const value_type &value)
-    {
-    }
+    template <typename T, typename Allocator>
+    iterator erase(const_iterator first, const_iterator last);
     */
 
     template <typename T, typename Allocator>
-    void Vector<T, Allocator>::sharink_to_fit()
+    void Vector<T, Allocator>::resize(size_type count)
+    { resize(count, value_type{}); }
+
+    template <typename T, typename Allocator>
+    void Vector<T, Allocator>::resize(size_type count, const value_type &value)
     {
-        value_type *newData = alloc.allocate(size());
-        termination = finish = uninitialized_copy(begin(), end(), newData);
-        free();
-        start = newData;
+        if (count > capacity()) {
+            reallocate(count);
+        }
+        if (count > size()) {
+            finish = uninitialized_fill_n(finish, count - size(), value);
+        }
+        while (size() > count) {
+            pop_back();
+        }
     }
+
+    template <typename T, typename Allocator>
+    void Vector<T, Allocator>::sharink_to_fit()
+    { reallocate(size()); }
 
     template <typename T, typename Allocator>
     void Vector<T, Allocator>::swap(Vector &other)
@@ -543,22 +472,32 @@ namespace sp {
         std::swap(start, other.start);
         std::swap(finish, other.finish);
         std::swap(termination, other.termination);
+        std::swap(alloc, other.alloc);
     }
 
     template <typename T, typename Allocator>
-    void Vector<T, Allocator>::alloc_copy(const Vector &other)
+    template <typename InputIterator>
+    void Vector<T, Allocator>::alloc_copy(InputIterator first, InputIterator last)
     {
-        start = alloc.allocate(other.capacity());
-        termination = start + other.capacity();
-        finish = std::uninitialized_copy(other.begin(), other.end(), start);
+        finish = start = alloc.allocate(static_cast<size_type>(last - first));
+        termination = start + (last - first);
+        finish = std::uninitialized_copy(first, last, start);
+    }
+    
+    template <typename T, typename Allocator>
+    void Vector<T, Allocator>::alloc_copy(size_type count, const value_type &value)
+    {
+        start = alloc.allocate(count);
+        termination = start + count;
+        finish = std::uninitialized_fill_n(start, count, value);
     }
 
     template <typename T, typename Allocator>
-    void Vector<T, Allocator>::reallocate()
+    void Vector<T, Allocator>::reallocate(size_type theCapacity)
     {
-        value_type *newData = alloc.allocate(2 * capacity());
+        value_type *newData = alloc.allocate(theCapacity);
         value_type *tmp = std::uninitialized_copy(begin(), end(), newData);
-        termination = newData + 2 * capacity();
+        termination = newData + theCapacity;
         free();
         start = newData;
         finish = tmp;
