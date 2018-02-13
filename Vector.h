@@ -9,6 +9,7 @@
 #include <climits> //UINT_MAX
 #include <memory> //allocator, uninitialized_copy, uninitialized_fill_n
 #include <initializer_list> //initializer_list
+#include <iterator> //distance
 
 namespace sp {
 
@@ -66,6 +67,12 @@ namespace sp {
             const_reference operator * () const
             { return *data; }
 
+            bool operator == (const_reverse_iterator other)
+            { return data == other.data; }
+
+            bool operator != (const_reverse_iterator other)
+            { return !(*this == other); }
+
         private:
             value_type *data;
         };
@@ -112,6 +119,7 @@ namespace sp {
             { return *data; }
         };
 
+
         //constructor
         explicit Vector(const allocator_type &allocator = allocator_type{});
         explicit Vector(size_type count);
@@ -140,10 +148,14 @@ namespace sp {
         allocator_type get_allocator() const;
 
         //access element
+        reference at(size_type index);
+        const_reference at(size_type index) const;
         reference operator [] (size_type index);
         const_reference operator [] (size_type index) const;
         reference front();
-        const_reference back() const ;
+        reference back();
+        const_reference front() const;
+        const_reference back() const;
         value_type *data() noexcept;
         const value_type *data() const noexcept;
 
@@ -167,15 +179,18 @@ namespace sp {
         size_type max_size() const noexcept;
         void reserve(size_type newCapacity);
         size_type capacity() const noexcept;
-        void sharink_to_fit();
+        void shrink_to_fit();
 
         //update
+        void clear() noexcept;
         void push_back(const value_type &value);
         void push_back(value_type &&value);
         void pop_back();
         iterator insert(const_iterator pos, const value_type &value);
         iterator insert(const_iterator pos, value_type &&value);
         iterator insert(const_iterator pos, size_type count, const value_type &value);
+        template<typename InputIterator>
+        iterator insert(const_iterator pos, InputIterator first, InputIterator last);
         iterator insert(const_iterator pos, std::initializer_list<value_type> ilist);
         iterator erase(const_iterator pos);
         iterator erase(const_iterator first, const_iterator last);
@@ -278,6 +293,7 @@ namespace sp {
         alloc_copy(count, value);
     }
 
+    //重载冲突
     template <typename T, typename Allocator>
     template <typename InputIterator>
     void Vector<T, Allocator>::assign(InputIterator first, InputIterator last)
@@ -293,6 +309,11 @@ namespace sp {
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::allocator_type Vector<T, Allocator>::get_allocator() const
     { return alloc; }
+
+    /*
+    reference at(size_type index);
+    const_reference at(size_type index) const;
+    */
 
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::reference Vector<T, Allocator>::operator [] (size_type index)
@@ -314,7 +335,6 @@ namespace sp {
     typename Vector<T, Allocator>::reference Vector<T, Allocator>::front()
     { return *start; }
 
-    /*
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::const_reference Vector<T, Allocator>::front() const
     { return *start; }
@@ -322,7 +342,6 @@ namespace sp {
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::reference Vector<T, Allocator>::back()
     { return *(finish - 1); }
-    */
 
     template <typename T, typename Allocator>
     typename Vector<T, Allocator>::const_reference Vector<T, Allocator>::back() const 
@@ -401,6 +420,14 @@ namespace sp {
     { return start == finish; }
 
     template <typename T, typename Allocator>
+    void Vector<T, Allocator>::clear() noexcept
+    {
+        while (end() != begin()) {
+            pop_back();
+        }
+    }
+
+    template <typename T, typename Allocator>
     void Vector<T, Allocator>::push_back(const value_type &value)
     {
         if (finish >= termination) {
@@ -424,25 +451,114 @@ namespace sp {
     void Vector<T, Allocator>::pop_back()
     { alloc.destroy(--finish); }
 
-    /*
     template <typename T, typename Allocator>
-    iterator insert(const_iterator pos, const value_type &value);
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, const value_type &value)
+    {
+        difference_type diff = pos - start;
+        push_back(value_type{});
+        pos = start + diff;
+        iterator it = end() - 1; 
+        while (it != pos) {
+            *it = *(it - 1);
+            --it;
+        }
+        *it = value;
+
+        return it;
+    }
 
     template <typename T, typename Allocator>
-    iterator insert(const_iterator pos, value_type &&value);
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, value_type &&value)
+    {
+        difference_type diff = std::distance(cbegin(), pos);
+        push_back(value_type{});
+        pos = start + diff;
+        iterator it = end() - 1; 
+        while (it != pos) {
+            *it = *(it - 1);
+            --it;
+        }
+        *it = std::move(value);
+
+        return it;
+    }
 
     template <typename T, typename Allocator>
-    iterator insert(const_iterator pos, size_type count, const value_type &value);
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, size_type count, const value_type &value)
+    {
+        difference_type diff = std::distance(cbegin(), pos);
+
+        for (difference_type i = 0; i < count; ++i) {
+            push_back(value_type{});
+        }
+        iterator it = end() - 1;
+        while (it - count + 1!= begin() + diff) {
+            *it = *(it - count);
+            --it;
+        }
+        while (count--) {
+            *it-- = value;
+        }
+
+        return it;
+    }
 
     template <typename T, typename Allocator>
-    iterator insert(const_iterator pos, std::initializer_list<value_type> ilist);
+    template<typename InputIterator>
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, InputIterator first, InputIterator last)
+    {
+        difference_type count = std::distance(first, last);
+        difference_type diff = std::distance(cbegin(), pos);
+
+        for (difference_type i = 0; i < count; ++i) {
+            push_back(value_type{});
+        }
+        iterator it = end() - 1;
+        while (it - count + 1 != begin() + diff) {
+            *it = *(it - count);
+            --it;
+        }
+        while (last != first) {
+            *it-- = *--last;
+        }
+
+        return it;
+    }
 
     template <typename T, typename Allocator>
-    iterator erase(const_iterator pos);
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::insert(const_iterator pos, std::initializer_list<value_type> ilist)
+    { return insert(pos, ilist.begin(), ilist.end()); }
 
     template <typename T, typename Allocator>
-    iterator erase(const_iterator first, const_iterator last);
-    */
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::erase(const_iterator pos)
+    {
+        iterator it = const_cast<iterator>(pos), result = it;
+
+        while (it + 1 != end()) {
+            *it = *(it + 1);
+            ++it;
+        }
+        pop_back();
+
+        return result;
+    }
+
+    template <typename T, typename Allocator>
+    typename Vector<T, Allocator>::iterator Vector<T, Allocator>::erase(const_iterator first, const_iterator last)
+    {
+        difference_type count = std::distance(first, last);
+        iterator it = const_cast<iterator>(first), result = it;
+
+        while (it + count != end()) {
+            *it = *(it + count);
+            ++it;
+        }
+        while (count--) {
+            pop_back();
+        }
+
+        return result;
+    }
 
     template <typename T, typename Allocator>
     void Vector<T, Allocator>::resize(size_type count)
@@ -455,7 +571,7 @@ namespace sp {
             reallocate(count);
         }
         if (count > size()) {
-            finish = uninitialized_fill_n(finish, count - size(), value);
+            finish = std::uninitialized_fill_n(finish, count - size(), value);
         }
         while (size() > count) {
             pop_back();
@@ -463,7 +579,7 @@ namespace sp {
     }
 
     template <typename T, typename Allocator>
-    void Vector<T, Allocator>::sharink_to_fit()
+    void Vector<T, Allocator>::shrink_to_fit()
     { reallocate(size()); }
 
     template <typename T, typename Allocator>
@@ -541,7 +657,7 @@ namespace sp {
             ++j;
         }
 
-        return i != lhs.end() && j != rhs.end() ? *i > *j : i != lhs.end();
+        return i != lhs.end() && j != rhs.end() ? *i < *j : j != rhs.end();
     }
 
     template<typename T, typename Allocator>
