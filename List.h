@@ -1,4 +1,6 @@
+//Created by sphc on 2018/2/6
 //List.h
+//
 
 #ifndef LIST__H
 #define LIST__H
@@ -606,10 +608,19 @@ namespace sp {
     { erase(--end()); }
 
     template <typename T, typename Allocator>
-    void List<T, Allocator>::resize(size_type count);
+    void List<T, Allocator>::resize(size_type count)
+    { resie(count, value_type{}); }
 
     template <typename T, typename Allocator>
-    void List<T, Allocator>::resize(size_type count, const value_type &value);
+    void List<T, Allocator>::resize(size_type count, const value_type &value)
+    {
+        while (size() > count) {
+            pop_back(); 
+        }
+        while (size() < count) {
+            push_back(value);
+        }
+    }
 
     template <typename T, typename Allocator>
     void List<T, Allocator>::swap(List &other)
