@@ -9,6 +9,7 @@
 #include <memory> //allocator
 #include <initializer_list> //initializer_list
 #include <climits> //UINT_MAX
+#include <functional> //less
 
 namespace sp {
 
@@ -306,6 +307,8 @@ namespace sp {
         size_type theSize;
         allocator_type allocator;
 
+        iterator insert_node(const_iterator pos, Node &node);
+        std::pair<iterator, Node *> erase_node(const_iterator pos);
         void free();
     };
 
@@ -515,15 +518,17 @@ namespace sp {
     template <typename T, typename Allocator>
     typename List<T, Allocator>::iterator List<T, Allocator>::insert(const_iterator pos, const value_type &value)
     {
-        Node *p = pos.content;
-        return iterator{this, p->prior = p->prior->next = new Node{value, p->prior, p}};
+        //Node *p = pos.content;
+        //return iterator{this, p->prior = p->prior->next = new Node{value, p->prior, p}};
+        return insert_node(pos, *new Node{value});
     }
 
     template <typename T, typename Allocator>
     typename List<T, Allocator>::iterator List<T, Allocator>::insert(const_iterator pos, value_type &&value)
     {
-        Node *p = pos.content;
-        return iterator{this, p->prior = p->prior->next = new Node{std::move(value), p->prior, p}};
+        //Node *p = pos.content;
+        //return iterator{this, p->prior = p->prior->next = new Node{std::move(value), p->prior, p}};
+        return insert_node(pos, *new Node{std::move(value)});
     }
 
     template <typename T, typename Allocator>
@@ -556,14 +561,18 @@ namespace sp {
     template <typename T, typename Allocator>
     typename List<T, Allocator>::iterator List<T, Allocator>::erase(const_iterator pos)
     {
+        std::pair<iterator, Node *> result = erase_node(pos);
+        /*
         Node *p = pos.content;
         iterator it{this, p->next};
 
         p->prior->next = p->next;
         p->next->prior = p-prior;
         delete p;
+        */
+        delete result.second;
 
-        return it;
+        return result.first;
     }
 
     template <typename T, typename Allocator>
@@ -609,7 +618,7 @@ namespace sp {
 
     template <typename T, typename Allocator>
     void List<T, Allocator>::resize(size_type count)
-    { resie(count, value_type{}); }
+    { resize(count, value_type{}); }
 
     template <typename T, typename Allocator>
     void List<T, Allocator>::resize(size_type count, const value_type &value)
@@ -633,11 +642,32 @@ namespace sp {
 
     //operation
     template <typename T, typename Allocator>
-    void List<T, Allocator>::merge(List &&other);
+    void List<T, Allocator>::merge(List &&other)
+    { merge(std::move(other), std::less<T>{}); }
 
     template <typename T, typename Allocator>
     template <typename Compare>
-    void List<T, Allocator>::merge(List &&other, Compare comp);
+    void List<T, Allocator>::merge(List &&other, Compare comp)
+    {
+        if (this != &other) {
+            iterator i = this->begin(), j = other.begin();
+            while (i != this->end() && j != other.end()) {
+                if (comp(*j, *i)) {
+                    std::pair<iterator, Node *> tmp = erase_node(*j);
+                    j = tmp.first;
+                    insert_node(i, *tmp.second);
+                }
+                else {
+                    ++i;
+                }
+            }
+            while (j != other.end()) {
+                std::pair<iterator, Node *> tmp = erase_node(*j);
+                j = tmp.first;
+                insert_node(i, *tmp.second);
+            }
+        }
+    }
 
     template <typename T, typename Allocator>
     void List<T, Allocator>::splice(const_iterator pos, List &&other);
@@ -671,6 +701,31 @@ namespace sp {
     template <typename T, typename Allocator>
     template <typename Compare>
     void List<T, Allocator>::sort(Compare comp);
+
+    template <typename T, typename Allocator>
+    typename List<T, Allocator>::iterator List<T, Allocator>::insert_node(const_iterator pos, Node &node)
+    {
+        Node *p = pos.content;
+
+        node->prior = p->prior;
+        node->next = p;
+        ++theSize;
+
+        return iterator{this, p->prior = p->prior->next = &node};
+    }
+
+    template <typename T, typename Allocator>
+    std::pair<typename List<T, Allocator>::iterator, typename List<T, Allocator>::Node> List<T, Allocator>::erase_node(const_iterator pos)
+    {
+        Node *p = pos.content;
+        iterator it{this, p->next};
+
+        p->prior->next = p->next;
+        p->next->prior = p-prior;
+        --theSize;
+
+        return std::pair{it, p};
+    }
 
     template <typename T, typename Allocator>
     void List<T, Allocator>::free()
